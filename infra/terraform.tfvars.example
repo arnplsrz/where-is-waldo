@@ -1,0 +1,2 @@
+cloudflare_api_token = "token with Zone:Read and DNS:Edit on arnplsrz.com"
+budget_alert_email   = "you@example.com"
