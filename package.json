@@ -5,7 +5,8 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
-    "lint": "eslint"
+    "lint": "eslint",
+    "deploy:web": "bash scripts/deploy-web.sh"
   },
   "dependencies": {
     "next": "16.4.3",
