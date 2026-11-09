@@ -2,7 +2,8 @@ import { randomUUID } from "node:crypto";
 import express, { type ErrorRequestHandler, type Request, type Response } from "express";
 import { GetCommand, PutCommand, UpdateCommand } from "@aws-sdk/lib-dynamodb";
 import { prisma } from "./db";
-import { hitTest, isExpired, LEADERBOARD_SIZE, qualifies, SESSION_TTL_MS } from "./game";
+import { cleanName, hitTest, isExpired, LEADERBOARD_SIZE, qualifies, SESSION_TTL_MS } from "./game";
+import { publishScore } from "./publish";
 import { dynamo, type Session, TABLE } from "./sessions";
 
 class HttpError extends Error {
@@ -17,6 +18,23 @@ async function loadSession(id: string, now: number) {
   const session = Item as Session;
   if (isExpired(session, now)) throw new HttpError(410, "Game expired");
   return session;
+}
+
+async function markSubmitted(id: string) {
+  try {
+    await dynamo.send(
+      new UpdateCommand({
+        TableName: TABLE,
+        Key: { id },
+        UpdateExpression: "SET submitted = :true",
+        ConditionExpression: "attribute_exists(finishedAt) AND attribute_not_exists(submitted)",
+        ExpressionAttributeValues: { ":true": true },
+      }),
+    );
+  } catch (error) {
+    if ((error as Error).name !== "ConditionalCheckFailedException") throw error;
+    throw new HttpError(409, "Score already submitted");
+  }
 }
 
 async function topTimes(photoId: string) {
@@ -143,6 +161,24 @@ export function createApp() {
       elapsedMs,
       qualifies: qualifies(elapsedMs, top.map((score) => score.elapsedMs)),
     });
+  });
+
+  api.post("/games/:id/score", async (req: Request<{ id: string }>, res: Response) => {
+    const name = cleanName(req.body?.name);
+    if (!name) throw new HttpError(400, "Name must be 1 to 24 characters");
+
+    const session = await loadSession(req.params.id, Date.now());
+    if (session.finishedAt === undefined || session.elapsedMs === undefined) {
+      throw new HttpError(409, "Game not finished");
+    }
+    if (session.submitted) throw new HttpError(409, "Score already submitted");
+
+    const score = { sessionId: session.id, photoId: session.photoId, name, elapsedMs: session.elapsedMs };
+
+    await publishScore(score)
+    await markSubmitted(score.sessionId)
+    
+    res.status(202).json(score);
   });
 
   app.use("/api", api);
