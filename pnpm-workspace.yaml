@@ -1,2 +1,10 @@
+packages:
+  - api
 allowBuilds:
   unrs-resolver: true
+  "@swc/core": true
+  esbuild: true
+  classic-level: true
+  prisma: true
+  "@prisma/engines": true
+  "@parcel/watcher": false
