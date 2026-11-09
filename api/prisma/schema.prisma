@@ -1,0 +1,44 @@
+generator client {
+  provider     = "prisma-client"
+  output       = "../src/generated/prisma"
+  moduleFormat = "cjs"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model Photo {
+  id         String      @id
+  title      String
+  src        String
+  width      Int
+  height     Int
+  characters Character[]
+  scores     Score[]
+}
+
+model Character {
+  id      String @id
+  photoId String
+  photo   Photo  @relation(fields: [photoId], references: [id], onDelete: Cascade)
+  name    String
+  hint    String
+  x       Float
+  y       Float
+  w       Float
+  h       Float
+
+  @@index([photoId])
+}
+
+model Score {
+  sessionId String   @id
+  photoId   String
+  photo     Photo    @relation(fields: [photoId], references: [id], onDelete: Cascade)
+  name      String
+  elapsedMs Int
+  createdAt DateTime @default(now())
+
+  @@index([photoId, elapsedMs])
+}
