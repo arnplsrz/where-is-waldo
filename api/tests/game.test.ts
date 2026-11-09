@@ -51,6 +51,10 @@ describe("qualifies", () => {
   test("does not qualify when slower than 10th place", () => {
     expect(qualifies(101_000, ten)).toBe(false);
   });
+
+  test("does not qualify when tied with a full board's 10th place", () => {
+    expect(qualifies(100_000, ten)).toBe(false);
+  });
 });
 
 describe("cleanName", () => {

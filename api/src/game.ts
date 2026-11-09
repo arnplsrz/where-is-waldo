@@ -17,7 +17,7 @@ export function isExpired(session: { ttl: number }, now: number) {
 
 export function qualifies(elapsedMs: number, topTimes: number[]) {
   if (topTimes.length < LEADERBOARD_SIZE) return true
-  if (elapsedMs < topTimes.at(-1)) return true 
+  if (topTimes.length > 0 && elapsedMs < topTimes.at(-1)!) return true 
   return false;
 }
 
