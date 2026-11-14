@@ -4,10 +4,8 @@ data "archive_file" "api_stub" {
   output_path = "${path.module}/.build/api-stub.zip"
 }
 
-resource "aws_iam_role" "api" {
-  name = "where-is-waldo-api"
-
-  assume_role_policy = jsonencode({
+locals {
+  lambda_assume_role = jsonencode({
     Version = "2012-10-17"
     Statement = [{
       Effect    = "Allow"
@@ -15,6 +13,11 @@ resource "aws_iam_role" "api" {
       Action    = "sts:AssumeRole"
     }]
   })
+}
+
+resource "aws_iam_role" "api" {
+  name               = "where-is-waldo-api"
+  assume_role_policy = local.lambda_assume_role
 }
 
 resource "aws_iam_role_policy" "api_logs" {
@@ -31,6 +34,32 @@ resource "aws_iam_role_policy" "api_logs" {
   })
 }
 
+resource "aws_iam_role_policy" "api_data" {
+  name = "data"
+  role = aws_iam_role.api.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect   = "Allow"
+        Action   = ["dynamodb:GetItem", "dynamodb:PutItem", "dynamodb:UpdateItem"]
+        Resource = aws_dynamodb_table.sessions.arn
+      },
+      {
+        Effect   = "Allow"
+        Action   = "sns:Publish"
+        Resource = aws_sns_topic.scores.arn
+      },
+      {
+        Effect   = "Allow"
+        Action   = "ssm:GetParameter"
+        Resource = local.database_url_parameter_arn
+      },
+    ]
+  })
+}
+
 resource "aws_cloudwatch_log_group" "api" {
   name              = "/aws/lambda/where-is-waldo-api"
   retention_in_days = 14
@@ -42,9 +71,20 @@ resource "aws_lambda_function" "api" {
   runtime          = "nodejs24.x"
   architectures    = ["arm64"]
   handler          = "index.handler"
+  memory_size      = 512
+  timeout          = 10
   filename         = data.archive_file.api_stub.output_path
   source_code_hash = data.archive_file.api_stub.output_base64sha256
   depends_on       = [aws_cloudwatch_log_group.api]
+
+  environment {
+    variables = {
+      NODE_OPTIONS       = "--enable-source-maps"
+      SESSIONS_TABLE     = aws_dynamodb_table.sessions.name
+      SCORES_TOPIC_ARN   = aws_sns_topic.scores.arn
+      DATABASE_URL_PARAM = var.database_url_parameter
+    }
+  }
 
   lifecycle {
     ignore_changes = [filename, source_code_hash]
