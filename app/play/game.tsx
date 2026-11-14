@@ -3,8 +3,17 @@
 import Image from "next/image";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { type KeyboardEvent, type MouseEvent, useEffect, useRef, useState } from "react";
-import { type Box, type Game as GameData, TARGET_RADIUS, startGame, submitGuess } from "@/lib/game-api";
+import { type FormEvent, type KeyboardEvent, type MouseEvent, useEffect, useRef, useState } from "react";
+import {
+  type Box,
+  type Game as GameData,
+  formatTime,
+  type Score,
+  startGame,
+  submitGuess,
+  submitScore,
+  TARGET_RADIUS,
+} from "@/lib/game-api";
 
 type Point = { x: number; y: number };
 type Marker = { characterId: string; name: string; box: Box };
@@ -33,8 +42,13 @@ function PhotoGame({ photoId }: { photoId: string }) {
   const [cursor, setCursor] = useState<Point | null>(null);
   const [markers, setMarkers] = useState<Marker[]>([]);
   const [message, setMessage] = useState("Click the photo, or use the arrow keys and Enter, to tag a character.");
-  const [finished, setFinished] = useState(false);
+  const [result, setResult] = useState<{ elapsedMs: number; qualifies: boolean } | null>(null);
   const [pending, setPending] = useState(false);
+  const [startedAt, setStartedAt] = useState(0);
+  const [elapsed, setElapsed] = useState(0);
+  const [name, setName] = useState("");
+  const [scoreState, setScoreState] = useState<"idle" | "sending" | "sent" | "failed">("idle");
+  const finished = result !== null;
   const photoRef = useRef<HTMLDivElement>(null);
   const cursorRef = useRef<HTMLDivElement>(null);
 
@@ -45,6 +59,7 @@ function PhotoGame({ photoId }: { photoId: string }) {
         if (!active) return;
         setGame(created);
         setStatus("ready");
+        setStartedAt(Date.now());
       })
       .catch(() => {
         if (active) setStatus("failed");
@@ -53,6 +68,12 @@ function PhotoGame({ photoId }: { photoId: string }) {
       active = false;
     };
   }, [photoId]);
+
+  useEffect(() => {
+    if (!startedAt || finished) return;
+    const timer = setInterval(() => setElapsed(Date.now() - startedAt), 100);
+    return () => clearInterval(timer);
+  }, [startedAt, finished]);
 
   useEffect(() => {
     cursorRef.current?.scrollIntoView({ block: "nearest", inline: "nearest" });
@@ -102,10 +123,12 @@ function PhotoGame({ photoId }: { photoId: string }) {
       return;
     }
     const rect = event.currentTarget.getBoundingClientRect();
-    setTarget({
+    const point = {
       x: (event.clientX - rect.left) / rect.width,
       y: (event.clientY - rect.top) / rect.height,
-    });
+    };
+    if (process.env.NODE_ENV === "development") console.log(`x: ${point.x.toFixed(4)}, y: ${point.y.toFixed(4)}`);
+    setTarget(point);
   };
 
   const handlePhotoKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
@@ -128,18 +151,18 @@ function PhotoGame({ photoId }: { photoId: string }) {
     if (!target || pending) return;
     setPending(true);
     try {
-      const result = await submitGuess(characterId, target.x, target.y);
-      if (result.correct && result.box) {
-        const box = result.box;
+      const guess = await submitGuess(game.id, characterId, target.x, target.y);
+      if (guess.correct && guess.box) {
+        const box = guess.box;
         setMarkers((current) => [...current, { characterId, name, box }]);
         setMessage(`You found ${name}!`);
       } else {
         setMessage(`That's not ${name}. Keep looking.`);
       }
-      if (result.finished) {
-        setFinished(true);
+      if (guess.finished && guess.elapsedMs !== undefined) {
+        setResult({ elapsedMs: guess.elapsedMs, qualifies: !!guess.qualifies });
         setCursor(null);
-        setMessage("You found everyone!");
+        setMessage(`You found everyone in ${formatTime(guess.elapsedMs)}!`);
       }
     } catch {
       setMessage("Could not check that guess. Try again.");
@@ -147,6 +170,22 @@ function PhotoGame({ photoId }: { photoId: string }) {
       setPending(false);
       setTarget(null);
       photoRef.current?.focus({ preventScroll: true });
+    }
+  };
+
+  const handleScore = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!result || scoreState === "sending") return;
+    setScoreState("sending");
+    try {
+      await submitScore(game.id, name);
+      const mine: Score = { name: name.replace(/\s+/g, " ").trim(), elapsedMs: result.elapsedMs, createdAt: new Date().toISOString() };
+      try {
+        sessionStorage.setItem(`waldo:mine:${game.photo.id}`, JSON.stringify(mine));
+      } catch {}
+      setScoreState("sent");
+    } catch {
+      setScoreState("failed");
     }
   };
 
@@ -162,7 +201,12 @@ function PhotoGame({ photoId }: { photoId: string }) {
   return (
     <main className="mx-auto w-full max-w-6xl flex-1 p-4">
       <header className="mb-3">
-        <h1 className="text-2xl font-semibold">{game.photo.title}</h1>
+        <div className="flex items-baseline justify-between gap-4">
+          <h1 className="text-2xl font-semibold">{game.photo.title}</h1>
+          <span className="font-mono tabular-nums" aria-label="Elapsed time">
+            {formatTime(result?.elapsedMs ?? elapsed)}
+          </span>
+        </div>
         <ul className="mt-2 flex flex-wrap gap-x-6 gap-y-1 text-sm">
           {game.characters.map((character) => {
             const isFound = foundIds.has(character.id);
@@ -251,10 +295,36 @@ function PhotoGame({ photoId }: { photoId: string }) {
         </div>
       </div>
 
-      {finished && (
-        <p className="mt-4">
-          <Link className="underline" href="/">Play again</Link>
-        </p>
+      {result && (
+        <section className="mt-4 flex flex-col gap-3">
+          {result.qualifies && scoreState !== "sent" && (
+            <form onSubmit={handleScore} className="flex flex-wrap items-end gap-2">
+              <label className="flex flex-col text-sm">
+                You made the top 10! Enter your name
+                <input
+                  required
+                  autoFocus
+                  maxLength={24}
+                  value={name}
+                  onChange={(event) => setName(event.target.value)}
+                  className="mt-1 rounded border border-zinc-500 bg-transparent px-2 py-1 text-base"
+                />
+              </label>
+              <button
+                type="submit"
+                disabled={scoreState === "sending" || !name.trim()}
+                className="rounded bg-zinc-200 px-3 py-1.5 text-black disabled:opacity-50"
+              >
+                {scoreState === "sending" ? "Saving..." : "Save score"}
+              </button>
+              {scoreState === "failed" && <p role="alert" className="w-full text-sm">Could not save your score. Try again.</p>}
+            </form>
+          )}
+          <p className="flex gap-4">
+            <Link className="underline" href={`/leaderboard?photo=${game.photo.id}`}>Leaderboard</Link>
+            <Link className="underline" href="/">Play again</Link>
+          </p>
+        </section>
       )}
     </main>
   );

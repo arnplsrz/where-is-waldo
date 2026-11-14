@@ -4,63 +4,49 @@ export type Character = { id: string; name: string; hint: string };
 
 export type Photo = { id: string; title: string; src: string; width: number; height: number };
 
-export type Game = { photo: Photo; characters: Character[] };
+export type Game = { id: string; photo: Photo; characters: Character[] };
 
-export type GuessResult = { correct: boolean; box?: Box; finished: boolean };
+export type GuessResult = { correct: boolean; box?: Box; finished: boolean; elapsedMs?: number; qualifies?: boolean };
+
+export type Score = { name: string; elapsedMs: number; createdAt: string };
 
 export const TARGET_RADIUS = 0.015;
 
-const photos: Photo[] = [
-  { id: "crowd", title: "The Crowd", src: "/photos/placeholder.svg", width: 1600, height: 1000 },
-];
+const BASE = `${process.env.NEXT_PUBLIC_API_URL ?? ""}/api`;
 
-const characters: (Character & { box: Box })[] = [
-  {
-    id: "waldo",
-    name: "Waldo",
-    hint: "Red and white stripes, round glasses",
-    box: { x: 0.735, y: 0.296, w: 0.015, h: 0.058 },
-  },
-  {
-    id: "wizard",
-    name: "The Wizard",
-    hint: "Blue robe, white beard, tall red hat",
-    box: { x: 0.2425, y: 0.654, w: 0.0175, h: 0.068 },
-  },
-  {
-    id: "wilma",
-    name: "Wilma",
-    hint: "Striped dress, brown hair, red bobble",
-    box: { x: 0.52, y: 0.162, w: 0.0175, h: 0.052 },
-  },
-];
-
-const found = new Set<string>();
-
-function ringTouchesBox(x: number, y: number, box: Box, heightPerWidth: number) {
-  const dx = Math.max(box.x - x, 0, x - (box.x + box.w));
-  const dy = Math.max(box.y - y, 0, y - (box.y + box.h)) * heightPerWidth;
-  return dx * dx + dy * dy <= TARGET_RADIUS * TARGET_RADIUS;
+class ApiError extends Error {
+  constructor(readonly status: number, message: string) {
+    super(message);
+  }
 }
 
-export async function listPhotos(): Promise<Photo[]> {
-  return photos;
+async function call<T>(path: string, body?: unknown): Promise<T> {
+  const res = await fetch(`${BASE}${path}`, {
+    method: body === undefined ? "GET" : "POST",
+    headers: body === undefined ? undefined : { "Content-Type": "application/json" },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new ApiError(res.status, data.error ?? `Request failed (${res.status})`);
+  return data as T;
 }
+
+export const listPhotos = () => call<Photo[]>("/photos");
 
 export async function startGame(photoId: string): Promise<Game | null> {
-  const photo = photos.find((p) => p.id === photoId);
-  if (!photo) return null;
-  found.clear();
-  return {
-    photo,
-    characters: characters.map(({ id, name, hint }) => ({ id, name, hint })),
-  };
+  try {
+    return await call<Game>("/games", { photoId });
+  } catch (error) {
+    if (error instanceof ApiError && error.status === 404) return null;
+    throw error;
+  }
 }
 
-export async function submitGuess(characterId: string, x: number, y: number): Promise<GuessResult> {
-  const box = characters.find((c) => c.id === characterId)?.box;
-  const correct = !!box && ringTouchesBox(x, y, box, photos[0].height / photos[0].width);
-  if (!correct) return { correct: false, finished: false };
-  found.add(characterId);
-  return { correct: true, box, finished: found.size === characters.length };
-}
+export const submitGuess = (gameId: string, characterId: string, x: number, y: number) =>
+  call<GuessResult>(`/games/${gameId}/guesses`, { characterId, x, y });
+
+export const submitScore = (gameId: string, name: string) => call<unknown>(`/games/${gameId}/score`, { name });
+
+export const getLeaderboard = (photoId: string) => call<Score[]>(`/photos/${encodeURIComponent(photoId)}/leaderboard`);
+
+export const formatTime = (ms: number) => `${(ms / 1000).toFixed(1)}s`;
