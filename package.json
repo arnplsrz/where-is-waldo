@@ -6,7 +6,9 @@
     "dev": "next dev",
     "build": "next build",
     "lint": "eslint",
-    "deploy:web": "bash scripts/deploy-web.sh"
+    "deploy:web": "bash scripts/deploy-web.sh",
+    "deploy:api": "bash scripts/deploy-api.sh",
+    "test": "pnpm --filter api test"
   },
   "dependencies": {
     "next": "16.4.3",
