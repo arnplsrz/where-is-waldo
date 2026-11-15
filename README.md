@@ -1,36 +1,71 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Where's Waldo
 
-## Getting Started
+A photo tagging game built for [The Odin Project](https://www.theodinproject.com/lessons/nodejs-where-s-waldo-a-photo-tagging-app). Pick a photo, click a spot, choose who is there, and find every character as fast as you can. The fastest times land on a per-photo leaderboard.
 
-First, run the development server:
+## Screenshots
+
+| Photos | Game | Leaderboard |
+| --- | --- | --- |
+| ![Photo picker](docs/screenshots/home.png) | ![Tagging a character](docs/screenshots/game.png) | ![Leaderboard](docs/screenshots/leaderboard.png) |
+
+## Features
+
+- Targeting box with a character dropdown, click-away and Escape to dismiss
+- Keyboard play: arrow keys move the target, Shift for larger steps, Enter to tag
+- Coordinates are normalized fractions, so hits work at any screen size
+- Character locations never reach the browser until found
+- The server owns the timer, so the time can't be faked
+- Top 10 leaderboard per photo
+
+## Tech stack
+
+| Layer | Tools |
+| --- | --- |
+| Frontend | Next.js (static export), React, Tailwind CSS |
+| API | Express 5 on AWS Lambda behind API Gateway |
+| Data | Postgres with Prisma 7, DynamoDB for game sessions |
+| Scores | SNS, SQS and a worker Lambda with a dead-letter queue |
+| Infra | Terraform, S3 and CloudFront, Cloudflare DNS |
+| Tests | Jest and SuperTest |
+
+## Architecture
+
+![Architecture](docs/screenshots/architecture.png)
+
+Source: [docs/architecture.drawio](docs/architecture.drawio)
+
+- CloudFront serves the static site from a private S3 bucket and routes `/api/*` to API Gateway.
+- Each game is a DynamoDB session with a TTL. Guesses are hit tested on the server.
+- A finished score is published to SNS, queued in SQS and written to Postgres by a worker. Duplicate deliveries are ignored by primary key.
+
+## Local development
+
+Requires Node 24, pnpm and a local Postgres.
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+pnpm install
+createdb waldo && createdb test_waldo
+cp api/.env.example api/.env
+echo "NEXT_PUBLIC_API_URL=http://localhost:4000" > .env.development.local
+
+pnpm --filter api migrate
+pnpm --filter api seed
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Run each in its own terminal:
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+```bash
+pnpm --filter api dev:dynamo
+pnpm --filter api dev
+pnpm dev
+```
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+Open [http://localhost:3000](http://localhost:3000).
 
-## Learn More
+## Tests
 
-To learn more about Next.js, take a look at the following resources:
+```bash
+pnpm test
+```
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+Runs unit tests for the game rules and integration tests for the API routes and score worker against `test_waldo` and an in-process DynamoDB.
