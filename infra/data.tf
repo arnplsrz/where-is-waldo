@@ -4,7 +4,8 @@ variable "database_url_parameter" {
 }
 
 locals {
-  database_url_parameter_arn = "arn:aws:ssm:us-east-1:${data.aws_caller_identity.current.account_id}:parameter/${trimprefix(var.database_url_parameter, "/")}"
+  database_url_parameter     = var.lab_vpc ? "lab-postgres-url" : var.database_url_parameter
+  database_url_parameter_arn = "arn:aws:ssm:us-east-1:${data.aws_caller_identity.current.account_id}:parameter/${trimprefix(local.database_url_parameter, "/")}"
 }
 
 resource "aws_dynamodb_table" "sessions" {

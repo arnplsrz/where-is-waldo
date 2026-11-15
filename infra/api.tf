@@ -75,15 +75,20 @@ resource "aws_lambda_function" "api" {
   timeout          = 10
   filename         = data.archive_file.api_stub.output_path
   source_code_hash = data.archive_file.api_stub.output_base64sha256
-  depends_on       = [aws_cloudwatch_log_group.api]
+  depends_on       = [aws_cloudwatch_log_group.api, aws_iam_role_policy_attachment.api_vpc]
 
   environment {
     variables = {
       NODE_OPTIONS       = "--enable-source-maps"
       SESSIONS_TABLE     = aws_dynamodb_table.sessions.name
       SCORES_TOPIC_ARN   = aws_sns_topic.scores.arn
-      DATABASE_URL_PARAM = var.database_url_parameter
+      DATABASE_URL_PARAM = local.database_url_parameter
     }
+  }
+
+  vpc_config {
+    subnet_ids         = var.lab_vpc ? aws_subnet.private[*].id : []
+    security_group_ids = var.lab_vpc ? [aws_security_group.lambda[0].id] : []
   }
 
   lifecycle {
